@@ -34,6 +34,7 @@ class NuscDatasetVis(MonoDataset):
         inputs[('K_ori', 0)] = []
         inputs["pose_spatial"] = []
         inputs['width_ori'], inputs['height_ori'], inputs['id'] = [], [], []
+        # inputs['semantic'] = []
 
         idx = int(index_temporal)
         frame_data = self.frame_datas[idx]
@@ -48,6 +49,9 @@ class NuscDatasetVis(MonoDataset):
         for cam_idx in range(cam_num):
             inputs['id'].append(camera_ids[cam_idx])
             cam_sample = frame_data[camera_names[cam_idx]]
+            # print("cam_sample keys", cam_sample.keys())
+            # print("cam_sample['filename'] keyss", cam_sample['filename'].keys())
+            # exit()
             color = self.loader(os.path.join(self.data_path, cam_sample['filename']))
             inputs['width_ori'].append(color.size[0])
             inputs['height_ori'].append(color.size[1])

@@ -148,11 +148,12 @@ class MonoDataset(data.Dataset):
         inputs = {}
         do_color_aug = self.is_train and random.random() > 0.5
         do_flip = False
-
+        # print("index", index)
         frame_index = self.filenames[index].strip().split()[0]
+        # print("frame_index", frame_index)
 
         self.frame_idxs = self.frame_idxs_permant
-
+        # print("inputs", inputs)
         self.get_info(inputs, frame_index, do_flip)
 
         # adjusting intrinsics to match each scale in the pyramid

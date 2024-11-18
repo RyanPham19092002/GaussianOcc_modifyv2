@@ -31,7 +31,7 @@ class NuscDataset(MonoDataset):
         self.data_path = os.path.join(self.opt.dataroot)
         
         # if (self.self_supervise != 'self') or (not self.is_train):
-        self.depth_path = os.path.join(self.opt.dataroot, 'depth_full')
+        self.depth_path = os.path.join(self.opt.dataroot, 'nuscenes_depth')
         cur_path = os.path.dirname(os.path.realpath(__file__))     
         self.mask_path = os.path.join(cur_path, 'nuscenes_mask')
         self.mask_loader = mask_loader_scene
@@ -67,15 +67,15 @@ class NuscDataset(MonoDataset):
         # if not self.self_supervise:
         #     raise NotImplementedError
 
-        version = 'v1.0-trainval'
-
+        version = 'v1.0-mini'
+        # print("kwargs", kwargs)
         if 'nusc' in kwargs:
             self.nusc = kwargs['nusc']
         else:
             self.nusc = NuScenes(version=version, dataroot=self.data_path, verbose=False)
-
+        # print("self.opt.data_type", self.opt.data_type)
         if self.opt.data_type == 'all':
-            with open('datasets/nusc/{}.txt'.format(self.split), 'r') as f:
+            with open('datasets/nusc/{}_mini.txt'.format(self.split), 'r') as f:
                 self.filenames = f.readlines()
 
         elif self.opt.data_type == 'tiny':
