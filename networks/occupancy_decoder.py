@@ -29,6 +29,7 @@ from mmdet.models.builder import build_loss
 # for gt occ loss
 from utils.losses.semkitti_loss import sem_scal_loss, geo_scal_loss
 from utils.losses.lovasz_softmax import lovasz_softmax
+from nerfstudio.cameras.camera_utils import get_interpolated_poses
 
 nusc_class_frequencies = np.array([
     944004,
@@ -318,6 +319,7 @@ class VolumeDecoder(nn.Module):
 
             # pdb.set_trace()
             depth, rgb_marched = self.get_splatting_rendering(K, C2W, pc, inputs)
+            
 
             if self.opt.use_semantic:
                 semantic = torch.cat(rgb_marched, dim=0).permute(0, 2, 3, 1).contiguous()
@@ -586,6 +588,24 @@ class VolumeDecoder(nn.Module):
         R_only[:, :3, 3] = 0
 
         rgb_marched = None
+        C2W_NVS = []
+        for j in range(C2W.shape[0]):
+            pose_a = C2W[j]
+            if j == C2W.shape[0] - 1:
+                pose_b = C2W[0]
+            else:
+                pose_b = C2W[j+1]
+            pose_ab = get_interpolated_poses(pose_a, pose_b, 3)
+            pose_NVS = torch.tensor(pose_ab[1])
+            one_row = torch.tensor([[0, 0, 0, 1]], dtype = torch.float32)
+            pose_NVS = torch.cat([pose_NVS, one_row], dim=0)
+            C2W_NVS.append(pose_NVS)
+            # print("pose_NVS shape", pose_NVS.shape, pose_NVS)
+        C2W_NVS = torch.stack(C2W_NVS)
+        C2W_NVS = C2W_NVS.cpu().numpy().astype(np.float32)
+        # C2W = C2W_NVS
+        # print("C2W_NVS shape", C2W_NVS.shape)
+        # exit()
 
         # depth
         for j in range (C2W.shape[0]):
@@ -617,11 +637,16 @@ class VolumeDecoder(nn.Module):
             else:
                 pc_i = pc
             
-            # all_cam_center = inputs['all_cam_center']
+            all_cam_center = inputs['all_cam_center']
+            # print(f"--------------------------{j}----------------------------")
+            # print("K\n", K[j], K[j].shape)
+            # print("c2w\n", C2W[j], C2W[j].shape)
+            # print("----------------------------------------------------------")
+            # exit()
             viewpoint_camera = geom.setup_opengl_proj(w = self.opt.render_w, h = self.opt.render_h, k = K[j], c2w = C2W[j],near=self.opt.min_depth, far=100)
             
             render_pkg = splatting_render(viewpoint_camera, pc_i, opt = self.opt)
-            
+            # print("render_pkg['render'] shape", render_pkg['render'].shape)
             depth_i = render_pkg['depth']
             rgb_marched_i = render_pkg['render'].unsqueeze(0)
             
@@ -699,10 +724,31 @@ class VolumeDecoder(nn.Module):
             eps_time = time.time()
 
             depth, rgb_marched, semantic, reg_loss = self.get_density(Voxel_feat_list[scale], is_train, inputs, cam_num)
-
+            # print("depth shape", depth[0].shape, len(depth))
+            # print("semantic shape", semantic[0].shape, len(semantic))
+            
+            #------test----------
+            # import imageio
+            # # rgb_marched_test = semantic[0].permute(0, 2, 3, 1)
+            # rgb_marched_test_split = torch.chunk(semantic[0], 6, dim=-1)
+            # for i, t in enumerate(rgb_marched_test_split):
+            #     # Chuyển tensor thành numpy array
+            #     img_array = t.cpu().numpy()   # Bỏ chiều batch size (1) đi
+            #     print("img_array shape", img_array.shape)
+            #     # Scale giá trị từ [-1, 1] hoặc [0, 1] sang [0, 255] nếu cần thiết
+            #     img_array = (img_array - img_array.min()) / (img_array.max() - img_array.min()) * 255
+            #     img_array = img_array.astype(np.uint8)
+                
+            #     # Lưu ảnh dưới dạng file .png
+            #     imageio.imwrite(f'/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/test/image_{i}.png', img_array)
+            # # print("rgb_marched shape", rgb_marched[0].shape)
+            # exit()
+            #---------------------------------------------------------------------
             eps_time = time.time() - eps_time
 
             # print('single rendering {} :(eps time:'.format(self.opt.render_type), eps_time, 'secs)')
+            self.outputs["rgb_marched"] = rgb_marched
+            # print("rgb_marched", rgb_marched)
 
             self.outputs[("disp", scale)] = depth
 

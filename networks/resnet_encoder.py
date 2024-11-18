@@ -49,9 +49,11 @@ def resnet_multiimage_input(num_layers, pretrained=False, num_input_images=1):
     blocks = {18: [2, 2, 2, 2], 34: [3, 4, 6, 3], 50: [3, 4, 6, 3]}[num_layers]
     block_type = {18: models.resnet.BasicBlock, 34: models.resnet.BasicBlock, 50: models.resnet.Bottleneck}[num_layers]
     model = ResNetMultiImageInput(block_type, blocks, num_input_images=num_input_images)
-
+    # print("num_layers", num_layers)
     if pretrained:
-        loaded = model_zoo.load_url(models.resnet.model_urls['resnet{}'.format(num_layers)])
+        url = 'https://download.pytorch.org/models/resnet34-333f7ec4.pth'
+        loaded = torch.hub.load_state_dict_from_url(url, progress=True)
+        # loaded = model_zoo.load_url(models.resnet.model_urls['resnet{}'.format(num_layers)])
         loaded['conv1.weight'] = torch.cat(
             [loaded['conv1.weight']] * num_input_images, 1) / num_input_images
         model.load_state_dict(loaded)
@@ -129,6 +131,9 @@ class UpsamplingConcat(nn.Module):
 
     def forward(self, x_to_upsample, x):
         x_to_upsample = self.upsample(x_to_upsample)
+        # print("================")
+        # print("x shape", x.shape)
+        # print("up to sample size", x_to_upsample.shape)
         x_to_upsample = torch.cat([x, x_to_upsample], dim=1)
         return self.conv(x_to_upsample)
 
@@ -186,7 +191,27 @@ class Encoder_res101(nn.Module):
 
         self.Upsampling_4 = Upsampling_4(512, 256)
 
-        self.depth_layer = nn.Conv2d(256, self.C, kernel_size=1, padding=0)
+        # self.upsampling_layer_1 = UpsamplingConcat(768, 256)
+
+        # self.Upsampling_5 = Upsampling_4(256, 128)
+
+        # self.upsampling_layer_2 = UpsamplingConcat(384, 128)
+
+        # self.Upsampling_6 = Upsampling_4(128, 64)
+
+        self.depth_layer = nn.Conv2d(256, self.C, kernel_size=1, padding=0)     #origin 256 -> C
+        # self.depth_layer_1 = nn.Conv2d(512, 96, kernel_size=1, padding=0)     #origin 256 -> C
+        # self.depth_layer_2 = nn.Conv2d(128, 32, kernel_size=1, padding=0)     #origin 256 -> C
+
+        # For multiple resolution outputs
+        # self.upsampling_layer_1 = UpsamplingConcat(1536, 512)
+        # self.upsampling_layer_2 = Upsampling_4(512, 256)
+        # self.upsampling_layer_3 = Upsampling_4(256, 128)
+
+        # # Convolutions to match desired output channels
+        # self.conv_32 = nn.Conv2d(128, 32, kernel_size=1, padding=0)
+        # self.conv_48 = nn.Conv2d(256, 48, kernel_size=1, padding=0)
+        # self.conv_96 = nn.Conv2d(512, 96, kernel_size=1, padding=0)
 
         if path is not None:
             print('loading the encoder pretrain from {}'.format(path))
@@ -207,13 +232,49 @@ class Encoder_res101(nn.Module):
         # pdb.set_trace()
         x2 = self.layer3(x1) # 1/16  channel: 1024
 
+        #=======================origin=========================
         x3 = self.upsampling_layer(x2, x1) # 1/8  512
 
-        x4 = self.Upsampling_4(x3) # 1/4
+        # x3_out = self.depth_layer_1(x3) #1/8 96
+        x4 = self.Upsampling_4(x3) # 1/4 256
 
-        x4 = self.depth_layer(x4)  # 1/4
+        x4_out = self.depth_layer(x4)  # 1/4 64
+        #=======================origin=========================
+        # x3 = self.upsampling_layer_1(x2, x1) 
+        # x4 = self.upsampling_layer_2(x3)  # 1/4, channel: 256
+        # x5 = self.upsampling_layer_3(x4)  # 1/2, channel: 128
 
-        return [x4]
+        # # Apply convolutions to match the desired output channels
+        # out_96 = self.conv_96(x3)  # [B, 96, H/8, W/8]
+        # out_48 = self.conv_48(x4)  # [B, 48, H/4, W/4]
+        # out_32 = self.conv_32(x5)  # [B, 32, H/2, W/2]
+        #=====================================================
+        # x5 = self.upsampling_layer_1(x3, x4)
+        # x6 = self.Upsampling_5(x5) # 1/2 128
+
+        # x6_out = self.depth_layer_2(x6) # 1/2 32
+
+        # x4 = self.Upsampling_4(x3)
+
+        # print("x4 shape", x4.shape)
+        # print("x3 shape", x3.shape)
+        # print("x2 shape", x2.shape)
+        # print("x1 shape", x1.shape)
+        # x5 = self.upsampling_layer_1(x3, x4)
+
+        # x6 = self.Upsampling_5(x5)
+
+        # x7 = self.upsampling_layer_2(x5, x6)
+
+        # x8 = self.Upsampling_6(x7)
+
+        # x8 = self.depth_layer(x8)
+        # print("resnet shape", x8.shape)
+
+        # return [x8]
+        # return [x6_out, x4_out, x3_out]
+        return [x4_out]
+        # return [out_32, out_48, out_96]
 
 
 if __name__ == '__main__':
