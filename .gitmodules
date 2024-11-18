@@ -1,3 +1,6 @@
 [submodule "GroundedSAM_OccNeRF"]
 	path = GroundedSAM_OccNeRF
 	url = https://github.com/JunchengYan/GroundedSAM_OccNeRF.git
+[submodule "UniDepth"]
+	path = UniDepth
+	url = /home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/UniDepth
