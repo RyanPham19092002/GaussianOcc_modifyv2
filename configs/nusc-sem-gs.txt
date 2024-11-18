@@ -5,14 +5,14 @@ log_dir=logs
 self_supervise = self
 volume_depth = True
 use_fix_mask=False
-eval_occ = True
-use_semantic = True
+eval_occ = False
+use_semantic = False
 semantic_classes = 18
 semantic_loss_weight = 0.02
 last_free = True
 max_depth_test=80
 
-use_fp16 = True
+use_fp16 = False
 contracted_coord = True
 contracted_ratio = 0.66667
 voxels_size = [24, 300, 300]
@@ -29,13 +29,13 @@ weight_distortion = 0.1
 min_depth = 0.1
 max_depth = 80
 batch_size = 6
-num_epochs = 12
+num_epochs = 8
 eval_frequency = 1000
 
 height = 384
 width = 640
-render_h = 180
-render_w = 320
+render_h = 384
+render_w = 640
 height_ori = 900
 width_ori = 1600
 
@@ -44,6 +44,8 @@ width_ori = 1600
 render_type = 3dgs
 gs_sample = 0
 gs_scale = 0.20
-rayiou = yes
+rayiou = false
 gt_pose = yes
 detach_pose = yes
+render_novel_view = False
+
