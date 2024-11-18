@@ -10,9 +10,12 @@ import numpy as np
 from runner import Runer
 from options import MonodepthOptions
 
+
 options = MonodepthOptions()
 opts = options.parse()
 
+# for path in [cfg.record.ckpt_path, cfg.record.show_path, cfg.record.logs_path, cfg.record.file_path]:
+#     Path(path).mkdir(exist_ok=True, parents=True)
 
 def setup_seed(seed):
     torch.manual_seed(seed)

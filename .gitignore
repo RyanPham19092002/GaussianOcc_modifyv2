@@ -1,12 +1,12 @@
 __pycache__
-ckpts
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/ckpts
 # configs
-data
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/data
 # lib
 # datasets
-logs_ddad
-logs_nusc
-logs
+# logs_ddad
+# logs_nusc
+# logs
 networks/networks
 # submodule
 # tools
@@ -16,3 +16,15 @@ run.sh
 # *.txt
 .DS_Store
 .idea/
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/scene_video_test
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/scene_video_vis
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/test
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/test_img
+/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/not_use
+data/
+log.txt
+models/
+not_use/
+scene_video_test/
+test/
+test_img/

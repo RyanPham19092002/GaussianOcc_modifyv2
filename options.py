@@ -352,6 +352,7 @@ class MonodepthOptions:
         self.parser.add_argument("--gs_sample", type=float, default=0, help="if set, 0 mean the xyz position is from the 2d lift!")
         self.parser.add_argument("--use_sfm_spatial", type=lambda x: x.lower() == 'true', default=False, help="if set, use sfm pseudo label")
         self.parser.add_argument("--evl_score", type=lambda x: x.lower() == 'true', default=False, help="if set, eval the occupancy score!")
+        self.parser.add_argument("--render_novel_view", type=lambda x: x.lower() == 'true', default=False, help="if set, render novel view!")
 
 
     def parse(self):
