@@ -10,7 +10,7 @@ import pdb
 
 
 dataroot = 'data/nuscenes'
-nusc = NuScenes(version='v1.0-trainval', dataroot=dataroot, verbose=False)
+nusc = NuScenes(version='v1.0-mini', dataroot=dataroot, verbose=False)
 splits = create_splits_scenes()
 val_scenes = splits['val']  # Define your own split.
 
@@ -33,6 +33,7 @@ def rt2mat(translation, quaternion=None, inverse=False, rotation=None):
 cam_types = ['CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT', 'CAM_FRONT_LEFT']
 vis_data_dict = {'frames': []}
 len_scenes = len(nusc.scene)
+print("len scene", len_scenes)
 pbar = tqdm(total=len_scenes)
 for i in range(len_scenes):
     scene = nusc.scene[i]
@@ -62,6 +63,7 @@ for i in range(len_scenes):
                     'intrinsics': intrinsics,
                 }
                 next = cam['next']
+                # print("next", next)
                 sample_data[cam_type] = next
                 frame_data[cam_type] = cam_data
                 if next == '':
@@ -71,7 +73,7 @@ for i in range(len_scenes):
                 break
             vis_data_dict['frames'].append(frame_data)
             frame_idx += 1
-        # pbar.write(f'{scene_name}: {frame_idx}')
+        pbar.write(f'{scene_name}: {frame_idx}')
         pbar.update(1)
 pbar.close()
 
