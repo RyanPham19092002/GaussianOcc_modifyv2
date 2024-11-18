@@ -1,0 +1,7 @@
+# ninja log v5
+1	14838	1724688317714346874	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/simple_knn.o	3fb49b40db7ca68
+0	30333	1724688333194346239	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/ext.o	878331d19b8bb7e7
+2	60388	1724688363262345006	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/spatial.o	6db7b3f2cc75c55
+26	15805	1728518776493318573	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/simple_knn.o	dfc1f5f08b04a9f7
+26	31484	1728518792157317930	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/ext.o	878331d19b8bb7e7
+27	66953	1728518827625316476	/home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/submodule/simple-knn/build/temp.linux-x86_64-cpython-38/spatial.o	f944398ea9a6ccff

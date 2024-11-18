@@ -1,0 +1,12 @@
+# ninja log v5
+0	11426	1723823939037562183	/data/Phat/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	afc80cad46556f9f
+0	25667	1723823953257451579	/data/Phat/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	74742f722cbcfd08
+0	47384	1723823974977282489	/data/Phat/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	509b78a4a9d7740f
+0	25197	1723854768	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	c217d56136b2aefd
+26	14444	1723855316	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	3295cdf59bb7a93e
+27	65961	1723855367	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	c48aad3c4a1cdc84
+32	22572	1723857946	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/ext.o	c217d56136b2aefd
+33	104019	1723858028	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	a62847678a763106
+33	403643	1723858327	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	288f820f52486ea1
+26	14966	1723951660	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/simple_knn.o	a35fad6d1a8ab096
+26	61294	1723951706	/home/ubuntu/Workspace/phat-intern-dev/VinAI/hierarchical-3d-gaussians/submodules/simple-knn/build/temp.linux-x86_64-cpython-310/spatial.o	6c809f86938d652e
