@@ -12,6 +12,7 @@ import time
 import shutil
 import pickle
 from copy import deepcopy
+from PIL import Image
 
 import cv2, pdb
 import torch.optim as optim
@@ -29,6 +30,13 @@ from utils.layers import *
 
 import utils.basic as basic
 import datetime, pytz
+from configs.config import ConfigStereoHuman as config
+from UniDepth.unidepth.models import UniDepthV1
+
+
+# logging.basicConfig(level=logging.INFO,
+#                     format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
+
 
 
 def get_dist_info(return_gpu_per_machine=False):
@@ -52,6 +60,17 @@ def get_dist_info(return_gpu_per_machine=False):
 
     return rank, world_size
 
+def z_score_normalization(depth):
+    mean_depth = depth.mean()
+    std_depth = depth.std()
+    normalized_depth = (depth - mean_depth) / std_depth
+    return normalized_depth
+
+def min_max_scaling(depth):
+    min_depth = depth.min()
+    max_depth = depth.max()
+    normalized_depth = (depth - min_depth) / (max_depth - min_depth)
+    return normalized_depth
 
 class DistributedSampler(_DistributedSampler):
 
@@ -76,9 +95,22 @@ class Runer:
 
     def __init__(self, options):
 
+        self.cfg = config()
+        self.cfg.load("configs/stage1.yaml")
+        self.cfg = self.cfg.get_cfg()
+
+        self.cfg.defrost()
+        # dt = datetime.today()
+        self.cfg.exp_name = 'exp_{}'.format(datetime.datetime.now(tz=pytz.timezone('Asia/Tokyo')).strftime("%Y_%m_%d_%H_%M_%S"))
+        self.cfg.record.ckpt_path = "experiments/%s/ckpt" % self.cfg.exp_name
+        self.cfg.record.show_path = "experiments/%s/show" % self.cfg.exp_name
+        self.cfg.record.logs_path = "experiments/%s/logs" % self.cfg.exp_name
+        self.cfg.record.file_path = "experiments/%s/file" % self.cfg.exp_name
+        self.cfg.freeze()
+
         self.opt = options
         self.opt.B = self.opt.batch_size // self.opt.cam_N
-        
+
         # pdb.set_trace()
         if 'gs' in self.opt.render_type:
             self.opt.semantic_sample_ratio = 1.0
@@ -93,20 +125,25 @@ class Runer:
         if 'ddad' in self.opt.config:
             self.opt.max_depth_test = 200
             self.opt.rayiou = 'No'
-      
+
         # pdb.set_trace()
-        
+
         self.log_path = osp.join(self.opt.log_dir, self.opt.model_name + '_' + self.opt.data_type , 'seg_{}_{}_{}_{}_pose_{}_{}_mask_{}'.format(
         self.opt.use_semantic, self.opt.semantic_loss_weight, self.opt.weight_entropy_last, self.opt.weight_distortion,
-        self.opt.gt_pose, self.opt.detach_pose, self.opt.use_fix_mask), 
+        self.opt.gt_pose, self.opt.detach_pose, self.opt.use_fix_mask),
         'type_{}_{}_s_{}_{}_l_{}_en_w_{}_ep_{}_f_{}_infi_{}_cont_{}_depth_{}_{}_{}'.format(
         self.opt.render_type, self.opt.gs_sample, self.opt.gs_scale, self.opt.render_h,  self.opt.self_supervise, self.opt.weight_entropy_last, self.opt.num_epochs,
         self.opt.auxiliary_frame , self.opt.infinite_range, self.opt.contracted_coord, self.opt.min_depth, self.opt.max_depth, self.opt.encoder),
         'exp_{}'.format(datetime.datetime.now(tz=pytz.timezone('Asia/Tokyo')).strftime("%Y_%m_%d_%H_%M_%S")))
-        
+
         print('---------------------------------------------------------')
         print('-------------log path:', self.log_path)
-        
+
+        if self.opt.render_novel_view:
+            print("Mode:=========================Render Novel view:=========================")
+        else:
+            print("Mode:=========================Render Input view:=========================")
+
         os.makedirs(osp.join(self.log_path, 'eval'), exist_ok=True)
         os.makedirs(osp.join(self.log_path, 'models'), exist_ok=True)
         os.makedirs(osp.join(self.log_path, 'visual_rgb_depth'), exist_ok=True)
@@ -134,40 +171,56 @@ class Runer:
         elif self.opt.encoder == 'small07':
 
             self.models["encoder"] = networks.NewCRFDepth.NewCRFDepth(version='small07', inv_depth=False, max_depth=200, opt = self.opt)
-        
+
         elif self.opt.encoder == 'large07':
-    
+
             self.models["encoder"] = networks.NewCRFDepth.NewCRFDepth(version='small07', inv_depth=False, max_depth=200, opt = self.opt)
-    
+
         elif self.opt.encoder == '50' or self.opt.encoder == '101':
             self.models["encoder"] = networks.Encoder_res101(self.opt.input_channel, path=None, network_type=self.opt.encoder)
-        
-        else: 
+
+        else:
             print('please define the encoder!')
 
 
 
-        self.models["depth"] = networks.VolumeDecoder(self.opt)
-        
-        
-        self.log_print('N_samples: {}'.format(self.models["depth"].N_samples))
-        self.log_print('Voxel size: {}'.format(self.models["depth"].voxel_size))
+        self.models["render_img"] = networks.VolumeDecoder(self.opt)
+
+
+        self.log_print('N_samples: {}'.format(self.models["render_img"].N_samples))
+        self.log_print('Voxel size: {}'.format(self.models["render_img"].voxel_size))
 
 
         self.models["encoder"] = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.models["encoder"])
         self.models["encoder"] = (self.models["encoder"]).to(self.device)
         self.parameters_to_train += [{'params': self.models["encoder"].parameters(), 'lr': self.opt.learning_rate, 'weight_decay': self.opt.weight_decay}]
 
-        self.models["depth"] = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.models["depth"])
-        self.models["depth"] = (self.models["depth"]).to(self.device)
-        self.parameters_to_train += [{'params': self.models["depth"].parameters(), 'lr': self.opt.de_lr, 'weight_decay': self.opt.weight_decay}]
+        self.models["render_img"] = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.models["render_img"])
+        self.models["render_img"] = (self.models["render_img"]).to(self.device)
+        self.parameters_to_train += [{'params': self.models["render_img"].parameters(), 'lr': self.opt.de_lr, 'weight_decay': self.opt.weight_decay}]
 
+        # #--------------------------------------------GS----------------------------------------------------
+        self.models["depth_2d"] = UniDepthV1.from_pretrained("lpiccinelli/unidepth-v1-vitl14") 
+        self.models["depth_2d"] = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.models["depth_2d"])
+        self.models["depth_2d"] = (self.models["depth_2d"]).to(self.device)
+        # self.models_depth_2d = self.models["depth_2d"]
+        # for param in self.models["depth_2d"].parameters():
+        #     param.requires_grad = False
+        # self.parameters_to_train += [{'params': self.models["depth_2d"].parameters(), 'lr': self.opt.de_lr, 'weight_decay': self.opt.weight_decay}]
+        self.parameters_to_train += [{'params': self.models["depth_2d"].parameters(), 'lr': self.cfg.lr, 'weight_decay': self.cfg.wdecay}]
+
+        self.models["decoder"] = networks.GSRegresser(self.cfg, rgb_dim=3, depth_dim=1)
+        self.models["decoder"] = torch.nn.SyncBatchNorm.convert_sync_batchnorm(self.models["decoder"])
+        self.models["decoder"] = (self.models["decoder"]).to(self.device)
+        # print('lr', self.cfg.lr, 'weight_decay', self.cfg.wdecay)
+        self.parameters_to_train += [{'params': self.models["decoder"].parameters(), 'lr': self.cfg.lr, 'weight_decay': self.cfg.wdecay}]
 
         # 6d pose
         if self.opt.gt_pose != 'No':
 
             if self.opt.eval_only:
-                self.opt.models_to_load = ['encoder', 'depth', 'pose_encoder', 'pose']
+                # self.opt.models_to_load = ['encoder', 'depth', 'pose_encoder', 'pose']
+                self.opt.models_to_load = ['encoder', 'render_img', 'depth_2d', 'decoder']
             else:
                 self.opt.models_to_load = ['pose_encoder', 'pose']
 
@@ -193,11 +246,16 @@ class Runer:
             self.load_model()
 
         # pdb.set_trace()
-        
-        for key in self.models.keys():
-            self.models[key] = DDP(self.models[key], device_ids=[self.local_rank], output_device=self.local_rank,
-                                   find_unused_parameters=True, broadcast_buffers=False)
 
+        for key in self.models.keys():
+            if key != "depth_2d":  # Bỏ qua DDP cho "depth_2d"
+                self.models[key] = DDP(self.models[key], device_ids=[self.local_rank], output_device=self.local_rank,
+                                    find_unused_parameters=True, broadcast_buffers=False)
+            else:
+                self.models[key].infer = self.models["depth_2d"].infer
+        for param in self.models["depth_2d"].parameters():
+            param.requires_grad = True
+            
         self.model_optimizer = optim.AdamW(self.parameters_to_train)
         self.criterion = nn.BCELoss()
         self.model_lr_scheduler = optim.lr_scheduler.StepLR(self.model_optimizer, self.opt.scheduler_step_size, gamma = 0.1, last_epoch=-1)
@@ -219,7 +277,7 @@ class Runer:
         datasets_dict = {
             "ddad": datasets.DDADDataset,
             "nusc": datasets.NuscDataset}
-
+        print("self.opt.dataset", self.opt.dataset)
         self.dataset = datasets_dict[self.opt.dataset]
 
         self.opt.batch_size = self.opt.batch_size // self.opt.cam_N
@@ -229,14 +287,14 @@ class Runer:
         if self.opt.dataset == 'nusc':
             # pdb.set_trace()
             # nusc = NuScenes(version='v1.0-trainval', dataroot=osp.join(self.opt.dataroot, 'nuscenes'), verbose=False)
-            nusc = NuScenes(version='v1.0-trainval', dataroot=osp.join(self.opt.dataroot), verbose=False)
+            nusc = NuScenes(version='v1.0-mini', dataroot=osp.join(self.opt.dataroot), verbose=False)
 
         elif self.opt.dataset == 'ddad':
             nusc = None
 
         else:
             nusc = None
-            
+
         # pdb.set_trace()
         train_dataset = self.dataset(self.opt,
                                      self.opt.height, self.opt.width,
@@ -251,6 +309,7 @@ class Runer:
             num_workers=self.opt.num_workers, pin_memory=True, drop_last=True, sampler=train_sampler)
 
         self.num_total_steps = len(self.train_loader) * self.opt.num_epochs
+
 
         val_dataset = self.dataset(self.opt,
                                    self.opt.height, self.opt.width,
@@ -300,7 +359,7 @@ class Runer:
         if self.local_rank == 0:
             self.log_print("There are {:d} training items and {:d} validation items\n".format(
                 len(train_dataset), len(val_dataset)))
-        
+
         if self.opt.use_semantic:
             if len(self.opt.class_frequencies) == self.opt.semantic_classes:
                 self.class_weights = 1.0 / np.sqrt(np.array(self.opt.class_frequencies, dtype=np.float32))
@@ -377,15 +436,16 @@ class Runer:
             source3 = 'run.py'
             source4 = 'options.py'
             source5 = 'run_vis.py'
-            source10 = 'run.sh'
+            # source10 = 'run.sh'
+            source10 = 'run.py'
 
             source6 = 'configs'
             source7 = 'networks'
             source8 = 'datasets'
             source9 = 'utils'
-            
+
             source = [source1, source3, source4, source5, source10]
-            
+
             for i in source:
                 shutil.copy(i, osp.join(self.log_path, 'code'))
 
@@ -417,7 +477,7 @@ class Runer:
 
             self.train_loader.sampler.set_epoch(self.epoch)
             self.run_epoch()
-            
+
             # self.save_model()
 
             self.val(epoch=self.epoch)
@@ -425,7 +485,7 @@ class Runer:
             if self.local_rank == 0:
                 self.log_print(f"Evaluation results at epoch {self.epoch} (step {self.step}):")
                 self.evaluation(evl_score=True)
-                
+
         self.save_model()
 
         self.val(epoch=self.epoch)
@@ -448,7 +508,7 @@ class Runer:
             eval_types = ['scale-aware']
             # else:
             #     eval_types = ['scale-ambiguous', 'scale-aware']
-            
+
             for eval_type in eval_types:
                 errors[eval_type] = {}
 
@@ -502,8 +562,8 @@ class Runer:
                 self.log_print(f"IoUs: {IoUs}")
                 self.log_print(f"mIoU without others: {mIoU_without_others}")
                 self.log_print(f"mIoU without empty: {mIoU_without_empty}")
-            
-            
+
+
             elif self.opt.eval_occ:
                 acc = np.array(errors['acc'])
                 comp = np.array(errors['comp'])
@@ -562,8 +622,8 @@ class Runer:
 
             if evl_rayiou == 'yes':
                 # pdb.set_trace()
-                str=('python ray_metrics.py --pred_dir {}'.format(osp.join(os.getcwd(), self.log_path, 'visual_feature', 'final'))) 
-                # str=('python ray_metrics.py --pred_dir {}'.format('/home/wsgan/project/bev/OccNeRF/logs/0817_rerun_debug_all/seg_True_0.02_0.1_0.1_pose_No_yes_mask_False/type_prob_0.0_s_0.2_180_l_self_en_w_0.1_ep_12_f_False_infi_True_cont_True_depth_0.1_80.0/exp_2024_08_17_01_34_08/visual_feature/final')) 
+                str=('python ray_metrics.py --pred_dir {}'.format(osp.join(os.getcwd(), self.log_path, 'visual_feature', 'final')))
+                # str=('python ray_metrics.py --pred_dir {}'.format('/home/wsgan/project/bev/OccNeRF/logs/0817_rerun_debug_all/seg_True_0.02_0.1_0.1_pose_No_yes_mask_False/type_prob_0.0_s_0.2_180_l_self_en_w_0.1_ep_12_f_False_infi_True_cont_True_depth_0.1_80.0/exp_2024_08_17_01_34_08/visual_feature/final'))
                 # os.chdir('/home/wsgan/project/bev/CVPR2024-Occupancy-Flow-Challenge/SparseOcc')
                 os.system(str)
 
@@ -574,18 +634,20 @@ class Runer:
         self.set_eval()
 
         errors = {}
-        
+
         # if self.opt.self_supervise:
         eval_types = ['scale-aware']
-        
+
         # else:
         #     eval_types = ['scale-ambiguous', 'scale-aware']
-        
+
         for eval_type in eval_types:
             errors[eval_type] = {}
 
         self.models["encoder"].eval()
-        self.models["depth"].eval()
+        self.models["decoder"].eval()
+        self.models["render_img"].eval()
+        self.models["depth_2d"].eval()
         ratios_median = []
 
         print('begin eval!')
@@ -607,13 +669,13 @@ class Runer:
         total_a1_52 = []
         total_a2_52 = []
         total_a3_52 = []
-        
+
         if self.opt.use_semantic and self.opt.eval_occ:
 
             occ_eval_metrics = occ_metrics.Metric_mIoU(
                 num_classes=18, use_lidar_mask=False, use_image_mask=True)
-        
-        
+
+
         elif self.opt.eval_occ:
             occ_eval_metrics = occ_metrics.Metric_FScore(use_image_mask=True)
         else:
@@ -636,20 +698,35 @@ class Runer:
                 camera_ids = data["id"]
 
                 features = self.models["encoder"](input_color)
+                #==========================================================#
+                device = torch.device('cuda:0') 
+                features = [feat.float().to(device) for feat in features]
+                
+                # features_tensor = torch.stack(features).to(device).squeeze(0)
+                features_tensor = features
+                
+                predictions_depth = self.models["depth_2d"].infer(input_color)
+                depth_2d = predictions_depth["depth"]
+                point_cloud = predictions_depth["points"]
+                
 
-                if self.opt.use_t != 'No':
-                    prev_inputs_color = data["color", -1, 0][:2*self.opt.cam_N].cuda()
-                    prev_feature = self.models["encoder"](prev_inputs_color)
-                    features = [torch.cat([features_i, prev_feature_i], dim=0) for features_i, prev_feature_i in zip(features, prev_feature)]
+                rot_maps, scale_maps, opacity_maps = self.models["decoder"](input_color,depth_2d, features_tensor)
 
-                output = self.models["depth"](features, data, epoch = 0, is_train=False)
+                #==========================================================#
+                # if self.opt.use_t != 'No':
+                #     prev_inputs_color = data["color", -1, 0][:2*self.opt.cam_N].cuda()
+                #     prev_feature = self.models["encoder"](prev_inputs_color)
+                #     features = [torch.cat([features_i, prev_feature_i], dim=0) for features_i, prev_feature_i in zip(features, prev_feature)]
+
+                # output = self.models["depth"](features, data, epoch = 0, is_train=False)
+                output = self.models["render_img"](features, data, rot_maps, scale_maps, depth_2d, opacity_maps, point_cloud, epoch = 0, is_train=False)
 
                 eps_time = time.time() - eps_time
 
                 eps_time = eps_time # - output['render_time']
 
                 # pdb.set_trace()
-                
+
                 total_time.append(eps_time)
 
                 if self.opt.volume_depth and self.opt.eval_occ:
@@ -664,7 +741,7 @@ class Runer:
                             semantics_gt=data['semantics_3d'].detach().cpu().numpy(),
                             mask_camera=data['mask_camera_3d'].detach().cpu().numpy().astype(bool),
                             mask_lidar=None)
-                        
+
                         if self.opt.rayiou == 'yes' and epoch == 'final':
                             # save npy
                             semantic_save_path = osp.join(self.log_path, 'visual_feature', epoch, data['token'][0] + '.npz')
@@ -689,7 +766,7 @@ class Runer:
 
                         occ_pred = torch.zeros_like(free_mask, dtype=torch.long)
 
-                        occ_pred[free_mask] = 17   
+                        occ_pred[free_mask] = 17
 
                         # pdb.set_trace()
 
@@ -698,7 +775,7 @@ class Runer:
                             semantics_gt=data['semantics_3d'].detach().cpu().numpy(),
                             mask_camera=data['mask_camera_3d'].detach().cpu().numpy().astype(bool),
                             mask_lidar=None)
-                        
+
 
                         # pdb.set_trace()
                         if self.local_rank == 0 and idx % 20 == 0:
@@ -775,7 +852,7 @@ class Runer:
 
 
                 if save_image and idx % save_frequency == 0 and self.local_rank == 0:
-                    
+
                     print('idx:', idx)
 
                     if self.opt.cam_N == 6:
@@ -793,7 +870,7 @@ class Runer:
 
                         depth_surround_view = np.concatenate((depth_left_front_right, depth_right_rear_left), axis=0)
                         surround_view = np.concatenate((image_surround_view, depth_surround_view), axis=0)
-                    
+
                     elif self.opt.cam_N == 1:
                         surround_view = np.concatenate((concated_image_list[0], concated_depth_list[0]), axis=0)
 
@@ -813,7 +890,7 @@ class Runer:
         for eval_type in eval_types:
             for camera_id in errors[eval_type].keys():
                 errors[eval_type][camera_id] = np.array(errors[eval_type][camera_id])
-        
+
         if self.opt.use_semantic and self.opt.eval_occ:
             class_names, mIoU, cnt = occ_eval_metrics.count_miou()
             errors['class_names'] = class_names
@@ -860,10 +937,22 @@ class Runer:
         len_loader = len(self.train_loader)
 
         # pdb.set_trace()
-        
+
         for batch_idx, inputs in enumerate(self.train_loader):
             before_op_time = time.time()
+            # with torch.cuda.amp.autocast():
             outputs, losses = self.process_batch(inputs)
+            # for key in self.models.keys():
+            #     # Chỉ chạy trên các mô hình đã được gán DDP hoặc là mô hình PyTorch
+            #     model = self.models[key]
+            #     for name, param in model.named_parameters():
+            #         if param.requires_grad:
+            #             pass
+            #         else:
+            #             print("11111111111111111111111111111111111111")
+            #             print(f"No gradient for {name} in model {key}")
+            #             print("requires_grad:", param.requires_grad)
+            #             print("-----------------------------------")
             scaler.scale(losses["loss"]).backward()
             scaler.step(self.model_optimizer)
             scaler.update()
@@ -891,7 +980,6 @@ class Runer:
             self.step += 1
 
         self.model_lr_scheduler.step()
-
     def process_batch(self, inputs):
         """Pass a minibatch through the network and generate images and losses
         """
@@ -902,18 +990,57 @@ class Runer:
         __u = lambda x: basic.unpack_seqdim(x, self.opt.B)
 
         self.to_device(inputs)
-        
+
         with torch.cuda.amp.autocast(enabled=self.opt.use_fp16):
 
             # if use pass frame, inputs["color_aug", 0, 0][:self.opt.cam_N] + inputs["color_aug", -1, 0][:2*self.opt.cam_N]
             # 需要把梯度去掉节省内存
 
-            inputs_color =  inputs["color_aug", 0, 0][:self.opt.cam_N]
+            # inputs_color =  inputs["color_aug", 0, 0][:self.opt.cam_N]
+            inputs_color =  inputs["color", 0, 0][:self.opt.cam_N]
+            
+            # depth_maps = inputs["depth"]
+            # print("inputs keys", inputs.keys())
+            # print("inputs depth", inputs["depth"], inputs["depth"].shape, inputs["depth"].min(), inputs["depth"].max())
+            
+            # print("self.opt", self.opt)
+            # exit()
+            # print("inputs_color max, min", inputs_color.max(), inputs_color.min())
+            for i in range(inputs_color.shape[0]):
+
+                rgb_tensor = inputs_color[i]  # shape (3, 180, 320)
+
+                rgb_image = rgb_tensor.permute(1, 2, 0).cpu().detach().numpy()  # (H, W, C)
+                
+                rgb_image = (255 * (rgb_image - rgb_image.min()) / (rgb_image.max() - rgb_image.min())).astype('uint8')
+                # rgb_image = (rgb_image * 255).astype('uint8')
+                img = Image.fromarray(rgb_image)
+                img.save(f"test_img/rgb_raw_image_{i}.png")
+
+            #     #======================================================================================================
+
+            #     depth_map_np = depth_maps[i].cpu().numpy()
+    
+            #     # Chuẩn hóa depth map về khoảng [0, 255] để có thể chuyển đổi thành ảnh
+            #     depth_map_normalized = (depth_map_np - depth_map_np.min()) / (depth_map_np.max() - depth_map_np.min())
+            #     depth_map_normalized = (depth_map_normalized * 255).astype(np.uint8)
+                
+            #     # Chuyển đổi numpy array sang Image object
+            #     img = Image.fromarray(depth_map_normalized)
+                
+            #     # Lưu ảnh với tên file
+            #     img.save(f"test_img/raw_depth_image_{i}.png")
+            # exit()
+            # print("Finished saving raw images.")
             features = self.models["encoder"](inputs_color)
+            # print("features shape", features.shape)
+            # exit()
+            
+            # print("features shape", features.shape)
 
 
             if self.opt.use_t != 'No':
-                
+
                 with torch.no_grad():
                     prev_inputs_color = inputs["color_aug", -1, 0][:2*self.opt.cam_N]
                     prev_feature = self.models["encoder"](prev_inputs_color)
@@ -921,12 +1048,62 @@ class Runer:
                 feat_length = len(features)
                 features = [torch.cat([features_i, prev_feature_i], dim=0) for features_i, prev_feature_i in zip(features, prev_feature)]
 
+        device = torch.device('cuda:0')
+        features = [feat.float().to(device) for feat in features]
+        # features_tensor = torch.stack(features).to(device).squeeze(0)
+        features_tensor = features
+        # Kiểm tra shape của tensor
+        # print("Shape of the image:", inputs_color.shape)
+        # print("Shape of the features:", features_tensor.shape)
 
-        features = [feat.float() for feat in features]
         
-        outputs = self.models["depth"](features, inputs, self.epoch)
-        # Note that for volume depth, outputs[("disp", 0)] is depth
 
+        
+        # print("Shape of depth", outputs[("disp", 0)].shape)
+
+
+        # Note that for volume depth, outputs[("disp", 0)] is depth
+        #=================================a===============stage1==========================================
+        # predictions_depth = self.models_depth_2d.infer(inputs_color)
+        K = inputs[('K', 0, 0)][:, :3, :3]
+        # print("K shape", K.shape)
+        # exit()
+        predictions_depth = self.models["depth_2d"].infer(inputs_color)
+        # print("predictions_depth keys", predictions_depth.keys())
+        depth_2d = predictions_depth["depth"]
+        point_cloud = predictions_depth["points"]
+
+        depth_2d.requires_grad_(True)
+        point_cloud.requires_grad_(True)
+ 
+
+        rot_maps, scale_maps, opacity_maps = self.models["decoder"](inputs_color, depth_2d, features_tensor)
+
+        outputs = self.models["render_img"](features, inputs, rot_maps, scale_maps, depth_2d, opacity_maps, point_cloud, self.epoch)
+
+        for i in range(outputs["rgb_marched"].shape[0]):
+
+            rgb_tensor = outputs["rgb_marched"][i]  # shape (3, 180, 320)
+
+            rgb_image = rgb_tensor.permute(1, 2, 0).cpu().detach().numpy()  # (H, W, C)
+            
+            rgb_image = (255 * (rgb_image - rgb_image.min()) / (rgb_image.max() - rgb_image.min())).astype('uint8')
+            # rgb_image = (rgb_image * 255).astype('uint8')
+            img = Image.fromarray(rgb_image)
+            img.save(f"test_img/rgb_image_{i}.png")
+
+            #---------------------depth gs--------------------
+            depth_map = outputs[("disp", 0)][i, 0]
+            depth_image = depth_map.cpu().detach().numpy()
+
+            # Chuẩn hóa giá trị depth map về khoảng [0, 255] để lưu dưới dạng ảnh 8-bit
+            depth_image = (255 * (depth_image - depth_image.min()) / (depth_image.max() - depth_image.min())).astype(np.uint8)
+
+            # Tạo ảnh từ mảng NumPy và lưu
+            img = Image.fromarray(depth_image)
+            img.save(f"test_img/depth_gs_image_{i}.png")
+
+        # exit()
         if self.opt.gt_pose != 'No':  # True
 
             with torch.no_grad():
@@ -937,18 +1114,31 @@ class Runer:
         losses = {}
         losses['loss'] = 0
 
-        if self.opt.render_type == 'gt':
+        # if self.opt.render_type == 'gt':
 
-            losses['loss'] = outputs[("loss_gt_occ", 0)]
+        #     losses['loss'] = outputs[("loss_gt_occ", 0)]
 
-            return outputs, losses
+        #     return outputs, losses
 
+
+        # list_type_img = [('color', -1, 0), ('color_identity', -1, 0), ('color', 1, 0), ('color_identity', 1, 0)]
         
-
         if self.opt.self_supervise != 'gt': # true
-
             self.generate_images_pred(inputs, outputs)
-            # pdb.set_trace()
+            # print("outputs keys", outputs.keys())
+            # # pdb.set_trace()
+            # for i in range(6):
+            #     for j in list_type_img:
+            #         rgb_tensor = outputs[j][i]  # shape (3, 180, 320)
+
+            #         rgb_image = rgb_tensor.permute(1, 2, 0).cpu().detach().numpy()  # (H, W, C)
+                    
+            #         rgb_image = (255 * (rgb_image - rgb_image.min()) / (rgb_image.max() - rgb_image.min())).astype('uint8')
+
+            #         img = Image.fromarray(rgb_image)
+            #         print(f"test_img/rgb_warping_image_{i}_type_{j}.png")
+            #         img.save(f"test_img/rgb_warping_image_{i}_type_{j}.png")
+            # exit()
             losses = self.compute_self_supervised_losses(inputs, outputs, losses)
 
             losses['loss'] += losses['self_loss']
@@ -967,7 +1157,7 @@ class Runer:
 
         return outputs, losses
 
-    
+
     def predict_poses(self, inputs, features):
         """Predict poses between input frames for monocular sequences.
         """
@@ -988,7 +1178,7 @@ class Runer:
             coarse_RT = None
 
             axisangle, translation = self.models["pose"](pose_inputs, joint_pose=True, coarse_RT = coarse_RT)
-            
+
             if self.opt.detach_pose != 'No':
                 axisangle = axisangle.detach()
                 translation = translation.detach()
@@ -1007,7 +1197,7 @@ class Runer:
 
 
     def get_gt_loss(self, disp, depth_gt, mask):
-        
+
 
         singel_scale_total_loss = 0
 
@@ -1025,7 +1215,7 @@ class Runer:
 
 
 
-   
+
         return singel_scale_total_loss
 
 
@@ -1033,6 +1223,11 @@ class Runer:
         """Generate the warped (reprojected) color images for a minibatch.
         Generated images are saved into the `outputs` dictionary.
         """
+        # print("self.opt.scales", self.opt.scales)
+        # print("self.opt.v1_multiscale", self.opt.v1_multiscale)
+        # print("self.opt.volume_depth", self.opt.volume_depth)
+        # print("self.opt.gt_pose", self.opt.gt_pose)
+        # print("self.opt.disable_automasking", self.opt.disable_automasking)
         for scale in self.opt.scales:
             disp = outputs[("disp", scale)]
             if self.opt.v1_multiscale:
@@ -1048,27 +1243,27 @@ class Runer:
                 depth = disp
             else:
                 depth = disp_to_depth(disp, self.opt.min_depth, self.opt.max_depth, abs=False)
-            
-            outputs[("depth", 0, scale)] = depth
 
+            outputs[("depth", 0, scale)] = depth
+            # print("depth loss", depth.max(), depth.min())
 
             for i, frame_id in enumerate(self.opt.frame_ids[1:]):
 
                 if self.opt.gt_pose != 'No':
                     T =  outputs[("cam_T_cam", 0, frame_id)]
-                
+
                 else:
                     T = inputs[("cam_T_cam", frame_id)]
 
-                
+
                 cam_points = self.backproject_depth[source_scale](
                     depth, inputs[("inv_K", 0, source_scale)])
-                
-                
+
+
                 pix_coords = self.project_3d[source_scale](
                     cam_points, inputs[("K", frame_id, source_scale)], T)
 
-                
+
                 outputs[("sample", frame_id, scale)] = pix_coords
 
                 outputs[("color", frame_id, scale)] = F.grid_sample(
@@ -1076,11 +1271,11 @@ class Runer:
                     outputs[("sample", frame_id, scale)],
                     padding_mode="border", align_corners=True)
 
-                
+                # print('outputs[("color", frame_id, scale)]',  outputs[("color", frame_id, scale)])
                 if not self.opt.disable_automasking:
                     outputs[("color_identity", frame_id, scale)] = \
                         inputs[("color", frame_id, source_scale)]
-    
+
 
     def compute_reprojection_loss(self, pred, target):
         """Computes reprojection loss between a batch of predicted and target images
@@ -1115,18 +1310,20 @@ class Runer:
                 source_scale = 0
 
             # pdb.set_trace()
-            disp = outputs[("disp", scale)]
-
+            # disp = outputs[("disp", scale)]   #origin
+            disp = 1.0 / (outputs[("disp", scale)] + 1e-7)
             # print('Scale {},  disp min {}, max {}'.format(scale, disp[0].min(), disp[0].max()))
             min_depth = disp[0].min()
             max_depth = disp[0].max()
 
 
             if self.opt.volume_depth:  # in fact, it is depth
-                disp = 1.0 / (disp + 1e-7)
+                # print("volume_depth")
+                # disp = 1.0 / (disp + 1e-7)
+                disp = outputs[("disp", scale)]
 
             color = inputs[("color", 0, scale)]
-            target = inputs[("color", 0, source_scale)]  
+            target = inputs[("color", 0, source_scale)]
             # 多帧监督的时候的target frame 是 【-1， 0， 1】
             
             for frame_id in self.opt.frame_ids[1:]:
@@ -1134,8 +1331,9 @@ class Runer:
                 reprojection_losses.append(self.compute_reprojection_loss(pred, target))
 
             reprojection_losses = torch.cat(reprojection_losses, 1)
-
-            if not self.opt.disable_automasking:
+            # print("reprojection_losses", reprojection_losses)
+            if not self.opt.disable_automasking:    #true
+                # print("not disable_automasking")
                 identity_reprojection_losses = []
                 for frame_id in self.opt.frame_ids[1:]:
                     pred = inputs[("color", frame_id, source_scale)]
@@ -1144,16 +1342,20 @@ class Runer:
 
                 identity_reprojection_losses = torch.cat(identity_reprojection_losses, 1)
 
-                if self.opt.avg_reprojection:
+                if self.opt.avg_reprojection:   #false
+                    print("avg_reprojection true")
                     identity_reprojection_loss = identity_reprojection_losses.mean(1, keepdim=True)
-                else:
+                else:   #true
+                    # print("avg_reprojection no")
                     # save both images, and do min all at once below
                     identity_reprojection_loss = identity_reprojection_losses
 
-            elif self.opt.predictive_mask:
+            elif self.opt.predictive_mask:      #false
+                print("true predictive_mask")
                 # use the predicted mask
                 mask = outputs["predictive_mask"]["disp", scale]
                 if not self.opt.v1_multiscale:
+                    print("not v1_multiscale")
                     mask = F.interpolate(
                         mask, [self.opt.height, self.opt.width],
                         mode="bilinear", align_corners=False)
@@ -1164,21 +1366,26 @@ class Runer:
                 weighting_loss = 0.2 * nn.BCELoss()(mask, torch.ones(mask.shape).cuda())
                 loss += weighting_loss.mean()
 
-            if self.opt.use_fix_mask:
+            if self.opt.use_fix_mask:       #false
+                print("use_fix_mask true")
                 reprojection_losses *= inputs["mask"] #* output_mask
 
-            if self.opt.avg_reprojection:
+            if self.opt.avg_reprojection:   #false
+                print("avg_reprojection true")
                 reprojection_loss = reprojection_losses.mean(1, keepdim=True)
-            else:
+            else:   #true
+                # print("avg_reprojection no")
                 reprojection_loss = reprojection_losses
 
-            if not self.opt.disable_automasking:
+            if not self.opt.disable_automasking:        #true
+                # print("no disable_automasking")
                 # add random numbers to break ties
                 identity_reprojection_loss += torch.randn(
                     identity_reprojection_loss.shape).cuda() * 0.00001
 
                 combined = torch.cat((identity_reprojection_loss, reprojection_loss), dim=1)
             else:
+                # print("disable_automasking")
                 combined = reprojection_loss
 
             # pdb.set_trace()
@@ -1188,6 +1395,7 @@ class Runer:
                 to_optimise, idxs = torch.min(combined, dim=1)
 
             if not self.opt.disable_automasking:
+                # print("disable_automasking no")
                 outputs["identity_selection/{}".format(scale)] = (
                     idxs > identity_reprojection_loss.shape[1] - 1).float()
 
@@ -1198,44 +1406,18 @@ class Runer:
 
             smooth_loss = get_smooth_loss(norm_disp, color)
 
-            loss += self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
-            
+            loss +=  self.opt.disparity_smoothness * smooth_loss / (2 ** scale)
+
             losses[f"loss_pe/{scale}"] = loss
 
-            semantic_loss = 0.0
-
-            if self.opt.use_semantic and scale == 0:
-                # pdb.set_trace()
-                pred_semantic = outputs[("semantic", 0)].float()
-                target_semantic = inputs["semantic"]
-                
-
-                # target_semantic[target_semantic > 0] = target_semantic[target_semantic > 0] - 1
-                target_semantic[target_semantic > 0] = target_semantic[target_semantic > 0]
-                
-                target_semantic = F.interpolate(target_semantic.unsqueeze(1).float(), size=pred_semantic.shape[1:3], mode="nearest").squeeze(1)
-                
-                # pdb.set_trace()
-                if self.opt.use_fix_mask:
-                    ddad_mask = F.interpolate(inputs["mask"][:,:1, :, :], size=pred_semantic.shape[1:3], mode="nearest").squeeze(1)
-                    ddad_mask = ddad_mask.bool()
-                    semantic_loss += self.sem_criterion(pred_semantic[ddad_mask], target_semantic[ddad_mask].long())
-                
-                else:
-                    semantic_loss += self.sem_criterion(pred_semantic.view(-1, self.opt.semantic_classes), target_semantic.view(-1).long())
-                
-                semantic_loss = self.opt.semantic_loss_weight * semantic_loss
-                losses[f"loss_semantic/{scale}"] = semantic_loss
-            
 
             loss_reg = 0
             for k, v in outputs.items():
                 if isinstance(k, tuple) and k[0].startswith("loss") and k[1] == scale:
                     losses[f"{k[0]}/{k[1]}"] = v
                     loss_reg += v
-            
-            total_loss += loss + loss_reg + semantic_loss
-            # losses["loss/{}".format(scale)] = loss + loss_reg + semantic_loss
+
+            total_loss += loss + loss_reg 
 
         total_loss /= self.num_scales
 
@@ -1348,7 +1530,11 @@ class Runer:
 
             for model_name, model in self.models.items():
                 save_path = osp.join(save_folder, "{}.pth".format(model_name))
-                to_save = model.module.state_dict()
+                # to_save = model.module.state_dict()
+                if hasattr(model, 'module'):
+                    to_save = model.module.state_dict()
+                else:
+                    to_save = model.state_dict()
                 if model_name == 'encoder':
                     # save the sizes - these are needed at prediction time
                     to_save['height'] = self.opt.height
