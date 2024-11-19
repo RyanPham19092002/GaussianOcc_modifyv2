@@ -4,9 +4,9 @@ __pycache__
 /home/vinai/Workspace/phat-intern-dev/VinAI/GaussianOcc/data
 # lib
 # datasets
-# logs_ddad
-# logs_nusc
-# logs
+logs_ddad/
+logs_nusc/
+logs/
 networks/networks
 # submodule
 # tools
@@ -27,4 +27,4 @@ models/
 not_use/
 scene_video_test/
 test/
-test_img/
+test_img/logs/
