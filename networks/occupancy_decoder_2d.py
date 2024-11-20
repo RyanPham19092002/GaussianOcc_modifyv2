@@ -1009,7 +1009,7 @@ class VolumeDecoder(nn.Module):
 
 
         # self.save_camera_info_to_ply(viewpoint_camera_list)
-        exit()
+        # exit()
         rgb_spaltting = torch.cat(rgb_spaltting, dim=0)
 
         # return depth, rgb_spaltting
