@@ -202,10 +202,10 @@ Using UniDepth model to predict depth map, using UNet via **"GS_param_networks.p
 
 Weights after training save at **"logs/.../models/weight_../.."**, the weight "render_img.pth" is the weight for predict 3dgs image
 
-Note:
+**Note:**
 1. Data curently using is nuscene v1.0-mini
 
-To do list:
+**To do list:**
 1. Find mask of overlap region and apply when training
 2. Change (UniDepth + Unet) to 1 model can predict Depth, Scale, Rotation, Opacity maps
 
