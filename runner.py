@@ -32,7 +32,7 @@ import utils.basic as basic
 import datetime, pytz
 from configs.config import ConfigStereoHuman as config
 from UniDepth.unidepth.models import UniDepthV1
-
+print("abc")
 
 # logging.basicConfig(level=logging.INFO,
 #                     format='%(asctime)s %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s')
@@ -94,9 +94,10 @@ class DistributedSampler(_DistributedSampler):
 class Runer:
 
     def __init__(self, options):
-
+        print("abc")
         self.cfg = config()
         self.cfg.load("configs/stage1.yaml")
+        print("self.cfg", self.cfg)
         self.cfg = self.cfg.get_cfg()
 
         self.cfg.defrost()
