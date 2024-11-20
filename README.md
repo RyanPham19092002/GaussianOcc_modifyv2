@@ -187,3 +187,15 @@ If you find this repository/work helpful in your research, welcome to cite the p
 ```
 #GaussianOcc-modified
 # GaussianOcc_modifyv2
+
+Data path : **"data/nuscenses"**
+
+Training : run **"sh run_gs_occ.sh"**
+
+Render image : run **"sh run_vis.sh"**
+
+Using UniDepth model to predict depth map, using UNet via **"GS_param_networks.py"** to predict Scale, Rotation, Opacity maps base on [GPS-Gaussian](https://github.com/aipixel/GPS-Gaussian/tree/169cf8a199586e2261f6013f7bec17a272d19060) model
+
+**"occupancy_decoder_2d.py"** predict 3DGS from RGB images, depth maps, scale maps, rotation maps and opacity maps
+
+Weights after training save at **"logs/.../models/weight_../.."**, the weight "render_img.pth" is the weight for predict 3dgs image
