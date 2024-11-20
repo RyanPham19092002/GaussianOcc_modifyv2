@@ -190,6 +190,8 @@ If you find this repository/work helpful in your research, welcome to cite the p
 
 Data path : **"data/nuscenses"**
 
+Env : follow **"environment.yml"**
+
 Training : run **"sh run_gs_occ.sh"**
 
 Render image : run **"sh run_vis.sh"**
@@ -199,3 +201,13 @@ Using UniDepth model to predict depth map, using UNet via **"GS_param_networks.p
 **"occupancy_decoder_2d.py"** predict 3DGS from RGB images, depth maps, scale maps, rotation maps and opacity maps
 
 Weights after training save at **"logs/.../models/weight_../.."**, the weight "render_img.pth" is the weight for predict 3dgs image
+
+Note:
+1. Data curently using is nuscene v1.0-mini
+
+To do list:
+1. Find mask of overlap region and apply when training
+2. Change (UniDepth + Unet) to 1 model can predict Depth, Scale, Rotation, Opacity maps
+
+
+
