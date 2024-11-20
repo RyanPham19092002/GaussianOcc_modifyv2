@@ -161,7 +161,7 @@ class Upsampling_4(nn.Module):
 
 # adapted from simple_baseline
 class Encoder_res101(nn.Module):
-    def __init__(self, C = 64, path = None, network_type = '101'):
+    def __init__(self, C = 48, path = None, network_type = '101'):
         super().__init__()
         self.C = C
 
@@ -199,7 +199,7 @@ class Encoder_res101(nn.Module):
 
         # self.Upsampling_6 = Upsampling_4(128, 64)
 
-        self.depth_layer = nn.Conv2d(256, self.C, kernel_size=1, padding=0)     #origin 256 -> C
+        self.depth_layer = nn.Conv2d(256, 48, kernel_size=1, padding=0)     #origin 256 -> C
         # self.depth_layer_1 = nn.Conv2d(512, 96, kernel_size=1, padding=0)     #origin 256 -> C
         # self.depth_layer_2 = nn.Conv2d(128, 32, kernel_size=1, padding=0)     #origin 256 -> C
 
